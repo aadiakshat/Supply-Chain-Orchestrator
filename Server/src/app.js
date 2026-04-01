@@ -6,6 +6,7 @@ import nodeRoutes from './routes/nodeRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
 import shipmentRoutes from './routes/shipmentRoutes.js';
 import rebalanceRoutes from './routes/rebalanceRoutes.js';
+import authRoutes from './routes/authRoutes.js';
 
 dotenv.config();
 
@@ -26,6 +27,7 @@ app.use('/api/nodes', nodeRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/shipments', shipmentRoutes);
 app.use('/api/rebalance', rebalanceRoutes);
+app.use('/api/auth', authRoutes);
 
 const PORT = process.env.PORT || 5000;
 
