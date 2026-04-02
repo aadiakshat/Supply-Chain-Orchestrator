@@ -75,11 +75,12 @@ export const updateShipmentStatus = async (req, res) => {
 
     if (!shipment) return res.status(404).json({ message: 'Shipment not found' });
 
+    const previousStatus = shipment.status;
     shipment.status = status;
     if (current_node_id) shipment.current_node = current_node_id;
 
     // 🔥 This is the core logic requested: if DELIVERED -> increase inventory + rebalance check
-    if (status === 'DELIVERED' && shipment.status !== 'DELIVERED') {
+    if (status === 'DELIVERED' && previousStatus !== 'DELIVERED') {
        const destination = await LocationNode.findById(shipment.destination);
        if (destination) {
          destination.inventory.current += shipment.amount;

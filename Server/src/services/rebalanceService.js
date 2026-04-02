@@ -1,55 +1,21 @@
 import LocationNode from '../models/LocationNode.js';
 import Shipment from '../models/Shipment.js';
 
-// Helper: Calculate standard Euclidean distance (or wrap the haversine formula here if not importing)
-const calcApproxDistance = (lat1, lon1, lat2, lon2) => {
-  return Math.sqrt(Math.pow(lat1 - lat2, 2) + Math.pow(lon1 - lon2, 2)) * 111.32; // Approx km
-};
-
-// HELPER: Find the best donor
-const findBestDonor = async (node, amountRequired) => {
-  const [longitude, latitude] = node.location.coordinates;
-
-  const surplusNodes = await LocationNode.find({
-    _id: { $ne: node._id },
-    location: {
-      $near: {
-        $geometry: { type: "Point", coordinates: [longitude, latitude] }
-      }
-    }
-  });
-
-  let selectedDonatingNode = null;
-
-  for (let potentialDonor of surplusNodes) {
-    if ((potentialDonor.inventory.current - amountRequired) > potentialDonor.inventory.minThreshold) {
-      selectedDonatingNode = potentialDonor;
-
-      // Hidden Power Move: Intelligent logging
-      const dist = calcApproxDistance(latitude, longitude, potentialDonor.location.coordinates[1], potentialDonor.location.coordinates[0]);
-      console.log(`🧠 [Rebalance Intelligence] Selected donor ${potentialDonor.name} because distance is approx ${Math.round(dist)}km and stock is ${potentialDonor.inventory.current}`);
-
-      break;
-    }
-  }
-  return selectedDonatingNode;
-};
-
-// HELPER: Create Transfer Shipment
+// HELPER: Create a transfer shipment, deducting from the donor immediately
 const createTransferShipment = async (fromNode, toNode, amount) => {
   fromNode.inventory.current -= amount;
   await fromNode.save();
 
-  const transferShipment = new Shipment({
+  const shipment = new Shipment({
     origin: fromNode._id,
     destination: toNode._id,
     current_node: fromNode._id,
     status: 'IN_TRANSIT',
-    amount: amount,
+    amount,
     isTransferOrder: true
   });
 
-  return await transferShipment.save();
+  return await shipment.save();
 };
 
 // CORE FUNCTION
@@ -59,30 +25,75 @@ export const checkAndTriggerRebalance = async (nodeId) => {
   try {
     const node = await LocationNode.findById(nodeId);
 
-    if (!node || node.inventory.current >= node.inventory.minThreshold) {
-      console.log(`[Rebalance Engine] Node healthy. Current: ${node?.inventory.current}, Threshold: ${node?.inventory.minThreshold}`);
+    // Only act on nodes that are critically low
+    if (!node || node.inventory.current > node.inventory.minThreshold) {
+      console.log(`[Rebalance Engine] Node "${node?.name}" is healthy or not found. Skipping.`);
       return;
     }
 
-    console.log(`[Rebalance Engine]  BOTTLENECK DETECTED! Node ${node.name}.`);
+    console.log(`[Rebalance Engine] 🚨 CRITICAL: "${node.name}" is at ${node.inventory.current} (threshold: ${node.inventory.minThreshold})`);
 
-    const targetInventory = Math.floor(node.inventory.capacity * 0.5);
-    let amountRequired = targetInventory - node.inventory.current;
-    if (amountRequired <= 0) amountRequired = 50;
+    // Block new shipment if one is already in flight — wait for it to be delivered first
+    const inFlightCount = await Shipment.countDocuments({
+      destination: node._id,
+      status: { $in: ['IN_TRANSIT', 'PENDING'] }
+    });
 
-    const donor = await findBestDonor(node, amountRequired);
+    if (inFlightCount > 0) {
+      console.log(`[Rebalance Engine] "${node.name}" already has ${inFlightCount} shipment(s) in transit. Waiting for delivery before sending more.`);
+      return;
+    }
+
+    // How much do we need to get to 50% capacity?
+    const target = Math.floor(node.inventory.capacity * 0.5);
+    const needed = Math.max(target - node.inventory.current, 1);
+
+    console.log(`[Rebalance Engine] Need ${needed} units to bring "${node.name}" to 50% capacity (${target} units).`);
+
+    // Find the nearest node that has enough surplus above its own threshold
+    const [longitude, latitude] = node.location.coordinates;
+
+    const candidates = await LocationNode.find({
+      _id: { $ne: node._id },
+      location: {
+        $near: {
+          $geometry: { type: 'Point', coordinates: [longitude, latitude] }
+        }
+      }
+    });
+
+    // Walk nearest → next nearest until we find one that can give
+    let donor = null;
+    let contribution = 0;
+
+    for (const candidate of candidates) {
+      const surplus = candidate.inventory.current - candidate.inventory.minThreshold;
+      if (surplus > 0) {
+        donor = candidate;
+        contribution = Math.min(surplus, needed); // take only what it can spare
+        break;
+      }
+      console.log(`[Rebalance Engine] "${candidate.name}" has no surplus (${candidate.inventory.current} / threshold: ${candidate.inventory.minThreshold}). Trying next nearest...`);
+    }
 
     if (!donor) {
-      console.warn(`[Rebalance Engine]  CRITICAL! No regional node has sufficient surplus to refill ${node.name}.`);
+      console.warn(`[Rebalance Engine] ❌ No node in the network has surplus to refill "${node.name}".`);
       return;
     }
 
-    console.log(`[Rebalance Engine] Solution found. Requesting Transfer Order from ${donor.name} to ${node.name}.`);
+    const dist = Math.round(
+      Math.sqrt(
+        Math.pow(latitude - donor.location.coordinates[1], 2) +
+        Math.pow(longitude - donor.location.coordinates[0], 2)
+      ) * 111.32
+    );
 
-    const transferOrder = await createTransferShipment(donor, node, amountRequired);
-    console.log(`[Rebalance Engine] Auto-Rebalance Complete! Transfer Order ID: ${transferOrder._id}`);
+    console.log(`🧠 [Rebalance] Pulling ${contribution} units from "${donor.name}" (~${dist}km away, has ${donor.inventory.current}).`);
+
+    const shipment = await createTransferShipment(donor, node, contribution);
+    console.log(`✅ [Rebalance] Transfer order created. ID: ${shipment._id} | ${donor.name} → ${node.name} | ${contribution} units`);
 
   } catch (error) {
-    console.error(`[Rebalance Engine] Error computing rebalance for node ${nodeId}:`, error);
+    console.error(`[Rebalance Engine] Error for node ${nodeId}:`, error);
   }
 };

@@ -61,9 +61,11 @@ export const updateNode = async (req, res) => {
     const node = await LocationNode.findById(req.params.id);
     if (!node) return res.status(404).json({ message: 'Node not found' });
     
-    // Simple update logic
+    // Update logic
     if(req.body.name) node.name = req.body.name;
-    if(req.body.capacity) node.inventory.capacity = req.body.capacity;
+    if(req.body.capacity != null) node.inventory.capacity = req.body.capacity;
+    if(req.body.minThreshold != null) node.inventory.minThreshold = req.body.minThreshold;
+    if(req.body.current != null) node.inventory.current = req.body.current;
     
     const updatedNode = await node.save();
     res.json(updatedNode);
