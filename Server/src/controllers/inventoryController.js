@@ -4,14 +4,14 @@ import { checkAndTriggerRebalance } from '../services/rebalanceService.js';
 // @desc    Update inventory logic for a specific node and trigger rebalance check
 // @route   POST /api/inventory/update
 export const updateInventory = async (req, res) => {
-  const { nodeId, amount } = req.body; 
+  const { nodeId, amount } = req.body;
 
   try {
     const node = await LocationNode.findById(nodeId);
 
     if (node) {
       node.inventory.current += amount;
-      
+
       // Ensure inventory doesn't exceed capacity or go below 0
       if (node.inventory.current > node.inventory.capacity) {
         node.inventory.current = node.inventory.capacity;
@@ -21,8 +21,8 @@ export const updateInventory = async (req, res) => {
       }
 
       await node.save();
-      
-      // 🔥 The powerful automation hook requested by the user:
+
+
       console.log(`[Inventory] node ${node.name} updated. New amount: ${node.inventory.current}. Triggering checkAndTriggerRebalance...`);
       checkAndTriggerRebalance(node._id).catch(err => console.error("Rebalancing error:", err));
 

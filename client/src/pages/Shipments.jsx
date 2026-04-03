@@ -55,36 +55,13 @@ const Shipments = () => {
         setRebalanceModal(true);
     
         try {
-            // Fetch all nodes, then trigger rebalance for each
-            const nodesRes = await api.get('/nodes');
-            const nodes = nodesRes.data;
-            
-            const logs = [];
-    
-            for (const node of nodes) {
-                try {
-                    await api.post(`/rebalance/${node._id}`);
-                    const wasBelowThreshold = node.inventory.current <= node.inventory.minThreshold;
-                    logs.push({
-                        type: wasBelowThreshold ? 'triggered' : 'healthy',
-                        message: wasBelowThreshold
-                            ? `⚡ Rebalance triggered for "${node.name}" (stock: ${node.inventory.current} / threshold: ${node.inventory.minThreshold})`
-                            : `✅ "${node.name}" is healthy (stock: ${node.inventory.current})`,
-                    });
-                } catch (err) {
-                    logs.push({
-                        type: 'error',
-                        message: `❌ Failed for "${node.name}": ${err.response?.data?.message || err.message}`,
-                    });
-                }
-            }
-    
-            setRebalanceLogs(logs);
+            const res = await api.post('/rebalance');
+            setRebalanceLogs(res.data.logs || []);
     
             // Refresh shipments list to show new transfer orders
             await fetchShipments();
         } catch (err) {
-            setRebalanceLogs([{ type: 'error', message: `Fatal error: ${err.message}` }]);
+            setRebalanceLogs([{ type: 'error', message: `Fatal error: ${err.response?.data?.message || err.message}` }]);
         } finally {
             setRebalancing(false);
         }
@@ -117,11 +94,11 @@ const Shipments = () => {
 
             {/* Rebalancer Results Modal */}
             <Modal isOpen={rebalanceModal} onClose={() => setRebalanceModal(false)} title="🧠 Rebalancer Results">
-                <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                <div className="space-y-3 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
                     {rebalancing && (
                         <div className="flex items-center gap-3 text-blue-500 font-medium text-sm">
                             <div className="w-4 h-4 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
-                            Analyzing all nodes...
+                            Scanning entire network for imbalances...
                         </div>
                     )}
                     {rebalanceLogs.map((log, i) => (
@@ -132,6 +109,9 @@ const Shipments = () => {
                                 log.type === 'triggered' && 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/50',
                                 log.type === 'healthy' && 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800/50',
                                 log.type === 'error' && 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800/50',
+                                log.type === 'skipped' && 'bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800/50',
+                                log.type === 'warning' && 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/50',
+                                log.type === 'info' && 'bg-slate-50 dark:bg-slate-800/30 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700/50',
                             )}
                         >
                             {log.message}
